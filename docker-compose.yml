@@ -1,0 +1,78 @@
+# Service definition for the Matrix music bot + its web UI.
+#
+# This lives in the app repo so it ships with the code. The homelab stack pulls
+# it in via services/matrix-musicbot/docker-compose.yml, which `include:`s this
+# file and feeds it that directory's .env for secrets/interpolation.
+#
+# Relative paths here resolve against this file's directory (apps/matrix-bot),
+# so ../../state/matrix-musicbot lands on homelab/state/matrix-musicbot — the
+# same target as when this definition lived under services/.
+
+services:
+  matrix-musicbot:
+    container_name: matrix-musicbot
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - MATRIX_HOMESERVER=https://${MATRIX_DOMAIN}
+      - MATRIX_USER=@${MUSICBOT_USER}:${MATRIX_DOMAIN}
+      - MATRIX_PASSWORD=${MUSICBOT_PASSWORD}
+      - LIVEKIT_URL=wss://${LIVEKIT_DOMAIN}
+      - LIVEKIT_API_KEY=${LIVEKIT_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_SECRET}
+      - LIVEKIT_SERVICE_URL=${LIVEKIT_SERVICE_URL}
+      - VOICE_ROOM_ID=${VOICE_ROOM_ID}
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID:-}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET:-}
+      - WEB_PORT=8080
+      - WEB_PASSWORD=${MUSICBOT_WEB_PASSWORD:-}
+      - WEB_API_KEY=${MUSICBOT_WEB_API_KEY:-}
+    volumes:
+      - ../../state/matrix-musicbot:/app/state
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=web
+      - traefik.http.services.matrix-musicbot-api.loadbalancer.server.port=8080
+      - traefik.http.routers.matrix-musicbot-api.rule=Host(`${MUSICBOT_DOMAIN:-musicbot.example.com}`) && PathPrefix(`/api`)
+      - traefik.http.routers.matrix-musicbot-api.entrypoints=websecure
+      - traefik.http.routers.matrix-musicbot-api.tls=true
+      - traefik.http.routers.matrix-musicbot-api.tls.certresolver=letsencrypt
+      - traefik.http.routers.matrix-musicbot-api.service=matrix-musicbot-api
+      - traefik.http.routers.matrix-musicbot-api.priority=20
+      # LAN + WireGuard only. To expose publicly instead, drop this middleware
+      # and set MUSICBOT_WEB_PASSWORD so the API isn't open to the internet.
+      - traefik.http.routers.matrix-musicbot-api.middlewares=local-only@file
+
+  matrix-musicbot-web:
+    container_name: matrixbot-web
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      # No VITE_API_BASE_URL: the SPA and API are same-origin behind Traefik, so
+      # the client uses relative /api/* paths directly.
+    restart: unless-stopped
+    mem_limit: 128m
+    depends_on:
+      - matrix-musicbot
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=web
+      - traefik.http.services.matrix-musicbot-web.loadbalancer.server.port=5173
+      - traefik.http.routers.matrix-musicbot.rule=Host(`${MUSICBOT_DOMAIN:-musicbot.example.com}`)
+      - traefik.http.routers.matrix-musicbot.entrypoints=websecure
+      - traefik.http.routers.matrix-musicbot.tls=true
+      - traefik.http.routers.matrix-musicbot.tls.certresolver=letsencrypt
+      - traefik.http.routers.matrix-musicbot.service=matrix-musicbot-web
+      - traefik.http.routers.matrix-musicbot.priority=1
+      - traefik.http.routers.matrix-musicbot.middlewares=local-only@file
+
+networks:
+  web:
+    external: true
+    name: web

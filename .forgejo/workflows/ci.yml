@@ -1,0 +1,17 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax gate
+        run: python3 -m compileall -q bot.py config.py web tests
+      - name: Build web
+        working-directory: frontend
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
